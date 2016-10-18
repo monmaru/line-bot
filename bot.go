@@ -1,11 +1,12 @@
 package linebot
 
 import (
-	"context"
 	"net/http"
 	"os"
 
+	"github.com/joho/godotenv"
 	"github.com/line/line-bot-sdk-go/linebot"
+	"golang.org/x/net/context"
 	"google.golang.org/appengine"
 	"google.golang.org/appengine/log"
 	"google.golang.org/appengine/urlfetch"
@@ -18,6 +19,11 @@ const (
 )
 
 func init() {
+	err := godotenv.Load("line.env")
+	if err != nil {
+		panic(err)
+	}
+
 	http.HandleFunc(CallbackURL, handleCallback)
 	http.ListenAndServe(Port, nil)
 }
@@ -34,7 +40,7 @@ func handleCallback(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		log.Criticalf(c, "linebot init error")
 		log.Criticalf(c, err.Error())
-		w.WriteHeader(500)
+		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
@@ -42,10 +48,10 @@ func handleCallback(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		if err == linebot.ErrInvalidSignature {
 			log.Errorf(c, "Invalid signature")
-			w.WriteHeader(400)
+			w.WriteHeader(http.StatusBadRequest)
 		} else {
 			log.Errorf(c, "Error on parse request")
-			w.WriteHeader(500)
+			w.WriteHeader(http.StatusInternalServerError)
 		}
 		return
 	}
