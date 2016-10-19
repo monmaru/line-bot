@@ -3,7 +3,9 @@ package linebot
 import (
 	"net/http"
 	"os"
+	"strings"
 
+	"github.com/ikawaha/kagome.ipadic/tokenizer"
 	"github.com/joho/godotenv"
 	"github.com/line/line-bot-sdk-go/linebot"
 	"golang.org/x/net/context"
@@ -18,12 +20,15 @@ const (
 	Port        = ":8080"
 )
 
+var dic tokenizer.Dic
+
 func init() {
 	err := godotenv.Load("line.env")
 	if err != nil {
 		panic(err)
 	}
 
+	dic = tokenizer.SysDic()
 	http.HandleFunc(CallbackURL, handleCallback)
 	http.ListenAndServe(Port, nil)
 }
@@ -38,8 +43,7 @@ func handleCallback(w http.ResponseWriter, req *http.Request) {
 	)
 
 	if err != nil {
-		log.Criticalf(c, "linebot init error")
-		log.Criticalf(c, err.Error())
+		log.Criticalf(c, "linebot init error", err.Error())
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -73,9 +77,9 @@ func handleCallback(w http.ResponseWriter, req *http.Request) {
 func messageHandler(c context.Context, bot *linebot.Client, event *linebot.Event) {
 	switch message := event.Message.(type) {
 	case *linebot.TextMessage:
-		pushTextMessage(c, bot, event, message.Text) // echo
+		pushTextMessage(c, bot, event, tokenize(message.Text))
 	case *linebot.ImageMessage:
-		pushTextMessage(c, bot, event, "Got image!!") // TODO: Vision API call
+		pushTextMessage(c, bot, event, "Got image!!")
 	default:
 		pushTextMessage(c, bot, event, "Got message!!")
 	}
@@ -97,4 +101,17 @@ func pushTextMessage(c context.Context, bot *linebot.Client, event *linebot.Even
 			log.Debugf(c, string(err.Error()))
 		}
 	}
+}
+
+func tokenize(s string) (m string) {
+	t := tokenizer.NewWithDic(dic)
+	tokens := t.Tokenize(s)
+	for _, token := range tokens {
+		if token.Class == tokenizer.DUMMY {
+			continue
+		}
+		features := strings.Join(token.Features(), ",")
+		m += token.Surface + "    " + features + "\n"
+	}
+	return
 }
