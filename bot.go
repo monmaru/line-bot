@@ -21,8 +21,8 @@ import (
 const (
 	CallbackURL        = "/callback"
 	QueueName          = "default"
-	TaskAnalyzeURL     = "/task/morphological-analysis"
-	TaskUnsupportedURL = "/task/unsupported"
+	TaskAnalyzeURL     = "/tasks/morphological-analysis"
+	TaskUnsupportedURL = "/tasks/unsupported"
 	Port               = ":8080"
 	UserIDKey          = "mid"
 	TextKey            = "text"

@@ -6,6 +6,10 @@ basic_scaling:
   idle_timeout: 1m
 
 handlers:
+- url: /tasks/.*
+  script: _go_app
+  login: admin
+
 - url: /.*
   script: _go_app
   secure: always
