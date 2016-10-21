@@ -2,6 +2,7 @@ package linebot
 
 import (
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -11,13 +12,19 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/appengine"
 	"google.golang.org/appengine/log"
+	"google.golang.org/appengine/taskqueue"
 	"google.golang.org/appengine/urlfetch"
 )
 
 // Constants
 const (
-	CallbackURL = "/callback"
-	Port        = ":8080"
+	CallbackURL        = "/callback"
+	QueueName          = "default"
+	TaskAnalyzeURL     = "/task/morphological-analysis"
+	TaskUnsupportedURL = "/task/unsupported"
+	Port               = ":8080"
+	UserIDKey          = "mid"
+	TextKey            = "text"
 )
 
 var dic tokenizer.Dic
@@ -30,17 +37,25 @@ func init() {
 
 	dic = tokenizer.SysDic()
 	http.HandleFunc(CallbackURL, handleCallback)
+	http.HandleFunc(TaskAnalyzeURL, pushAnalysisResult)
+	http.HandleFunc(TaskUnsupportedURL, pushUnsupportedMessage)
 	http.ListenAndServe(Port, nil)
+}
+
+func createBotClient(c context.Context) (bot *linebot.Client, err error) {
+	bot, err = linebot.New(
+		os.Getenv("CHANNEL_SECRET"),
+		os.Getenv("CHANNEL_TOKEN"),
+		linebot.WithHTTPClient(urlfetch.Client(c)),
+	)
+
+	return
 }
 
 func handleCallback(w http.ResponseWriter, req *http.Request) {
 	c := appengine.NewContext(req)
 
-	bot, err := linebot.New(
-		os.Getenv("CHANNEL_SECRET"),
-		os.Getenv("CHANNEL_TOKEN"),
-		linebot.WithHTTPClient(urlfetch.Client(c)),
-	)
+	bot, err := createBotClient(c)
 
 	if err != nil {
 		log.Criticalf(c, "linebot init error", err.Error())
@@ -60,46 +75,85 @@ func handleCallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// とりあえずタスクキューにつっこんですぐにレスポンスを返す
 	for _, event := range events {
-		switch event.Type {
-		case linebot.EventTypeMessage:
-			messageHandler(c, bot, event)
-		case linebot.EventTypePostback:
-			postbackHanlder(c, bot, event)
-		case linebot.EventTypeBeacon:
-			beaconHandler(c, bot, event)
-		default:
+		if event.Source.Type == linebot.EventSourceTypeUser {
+			switch event.Type {
+			case linebot.EventTypeMessage:
+				handleMessageEvent(c, bot, event)
+			case linebot.EventTypePostback:
+				log.Debugf(c, "Got postBack!!")
+				postUnsupportedTask(c, bot, event)
+			case linebot.EventTypeBeacon:
+				log.Debugf(c, "Got beacon!!")
+				postUnsupportedTask(c, bot, event)
+			default:
+			}
 		}
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-func messageHandler(c context.Context, bot *linebot.Client, event *linebot.Event) {
+func handleMessageEvent(c context.Context, bot *linebot.Client, event *linebot.Event) {
+	source := event.Source
 	switch message := event.Message.(type) {
 	case *linebot.TextMessage:
-		pushTextMessage(c, bot, event, tokenize(message.Text))
+		log.Debugf(c, "Got text!!")
+		task := taskqueue.NewPOSTTask(TaskAnalyzeURL, url.Values{
+			UserIDKey: {source.UserID},
+			TextKey:   {message.Text},
+		})
+		taskqueue.Add(c, task, QueueName)
 	case *linebot.ImageMessage:
-		pushTextMessage(c, bot, event, "Got image!!")
+		log.Debugf(c, "Got image!!")
+		postUnsupportedTask(c, bot, event)
 	default:
-		pushTextMessage(c, bot, event, "Got message!!")
+		log.Debugf(c, "Got other foramt!!")
+		postUnsupportedTask(c, bot, event)
 	}
 }
 
-func postbackHanlder(c context.Context, bot *linebot.Client, event *linebot.Event) {
-	pushTextMessage(c, bot, event, "Got PostBack!!")
-}
-
-func beaconHandler(c context.Context, bot *linebot.Client, event *linebot.Event) {
-	pushTextMessage(c, bot, event, "Got beacon!!")
-}
-
-func pushTextMessage(c context.Context, bot *linebot.Client, event *linebot.Event, message string) {
+func postUnsupportedTask(c context.Context, bot *linebot.Client, event *linebot.Event) {
 	source := event.Source
-	if source.Type == linebot.EventSourceTypeUser {
-		log.Debugf(c, message)
-		if _, err := bot.PushMessage(source.UserID, linebot.NewTextMessage(message)).Do(); err != nil {
-			log.Debugf(c, string(err.Error()))
-		}
+	task := taskqueue.NewPOSTTask(TaskUnsupportedURL, url.Values{
+		UserIDKey: {source.UserID},
+	})
+	taskqueue.Add(c, task, QueueName)
+}
+
+func pushAnalysisResult(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+	bot, err := createBotClient(c)
+	if err != nil {
+		log.Criticalf(c, "linebot init error", err.Error())
+		return
+	}
+
+	mid := r.FormValue(UserIDKey)
+	text := r.FormValue(TextKey)
+	message := tokenize(text) // 形態素解析
+
+	pushTextMessage(c, bot, mid, message)
+}
+
+func pushUnsupportedMessage(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+	bot, err := createBotClient(c)
+	if err != nil {
+		log.Criticalf(c, "linebot init error", err.Error())
+		return
+	}
+
+	mid := r.FormValue(UserIDKey)
+	message := "テキスト形式以外はサポートしていません"
+
+	pushTextMessage(c, bot, mid, message)
+}
+
+func pushTextMessage(c context.Context, bot *linebot.Client, userID string, message string) {
+	log.Debugf(c, message)
+	if _, err := bot.PushMessage(userID, linebot.NewTextMessage(message)).Do(); err != nil {
+		log.Debugf(c, string(err.Error()))
 	}
 }
 
