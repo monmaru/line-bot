@@ -1,6 +1,7 @@
 package linebot
 
 import (
+	"html/template"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,6 +40,7 @@ func init() {
 	http.HandleFunc(CallbackURL, handleCallback)
 	http.HandleFunc(TaskAnalyzeURL, pushAnalysisResult)
 	http.HandleFunc(TaskUnsupportedURL, pushUnsupportedMessage)
+	http.HandleFunc("/", usage)
 	http.ListenAndServe(Port, nil)
 }
 
@@ -168,4 +170,13 @@ func tokenize(s string) (m string) {
 		m += token.Surface + "    " + features + "\n"
 	}
 	return
+}
+
+func usage(w http.ResponseWriter, r *http.Request) {
+	response := template.Must(template.ParseFiles("templates/usage.html"))
+	response.Execute(w, struct {
+		QR string
+	}{
+		QR: os.Getenv("QR_URL"),
+	})
 }
