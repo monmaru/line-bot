@@ -56,7 +56,6 @@ func createBotClient(c context.Context) (bot *linebot.Client, err error) {
 
 func handleCallback(w http.ResponseWriter, req *http.Request) {
 	c := appengine.NewContext(req)
-
 	bot, err := createBotClient(c)
 
 	if err != nil {
@@ -147,7 +146,7 @@ func pushUnsupportedMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mid := r.FormValue(UserIDKey)
-	message := "テキスト形式以外はサポートしていません"
+	message := "文字列以外はサポートしていません"
 
 	pushTextMessage(c, bot, mid, message)
 }
