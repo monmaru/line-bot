@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/ikawaha/kagome.ipadic/tokenizer"
 	"github.com/joho/godotenv"
@@ -28,7 +30,10 @@ const (
 	TextKey            = "text"
 )
 
-var dic tokenizer.Dic
+var (
+	dic     tokenizer.Dic
+	initDic = new(sync.Once)
+)
 
 func init() {
 	err := godotenv.Load("line.env")
@@ -36,11 +41,10 @@ func init() {
 		panic(err)
 	}
 
-	dic = tokenizer.SysDic()
 	http.HandleFunc(CallbackURL, handleCallback)
 	http.HandleFunc(TaskAnalyzeURL, pushAnalysisResult)
 	http.HandleFunc(TaskUnsupportedURL, pushUnsupportedMessage)
-	http.HandleFunc("/", usage)
+	http.Handle("/", &usageHandler{filename: "usage.html"})
 	http.ListenAndServe(Port, nil)
 }
 
@@ -84,13 +88,13 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 				handleMessageEvent(c, bot, event)
 			case linebot.EventTypePostback:
 				log.Debugf(c, "Got postBack!!")
-				postUnsupportedTask(c, bot, event)
+				addUnsupportedTask(c, bot, event)
 			case linebot.EventTypeBeacon:
 				log.Debugf(c, "Got beacon!!")
-				postUnsupportedTask(c, bot, event)
+				addUnsupportedTask(c, bot, event)
 			default:
 				log.Debugf(c, "Got other event!!")
-				postUnsupportedTask(c, bot, event)
+				addUnsupportedTask(c, bot, event)
 			}
 		}
 	}
@@ -109,14 +113,14 @@ func handleMessageEvent(c context.Context, bot *linebot.Client, event *linebot.E
 		taskqueue.Add(c, task, QueueName)
 	case *linebot.ImageMessage:
 		log.Debugf(c, "Got image!!")
-		postUnsupportedTask(c, bot, event)
+		addUnsupportedTask(c, bot, event)
 	default:
 		log.Debugf(c, "Got other foramt!!")
-		postUnsupportedTask(c, bot, event)
+		addUnsupportedTask(c, bot, event)
 	}
 }
 
-func postUnsupportedTask(c context.Context, bot *linebot.Client, event *linebot.Event) {
+func addUnsupportedTask(c context.Context, bot *linebot.Client, event *linebot.Event) {
 	source := event.Source
 	task := taskqueue.NewPOSTTask(TaskUnsupportedURL, url.Values{
 		UserIDKey: {source.UserID},
@@ -134,9 +138,8 @@ func pushAnalysisResult(w http.ResponseWriter, r *http.Request) {
 
 	mid := r.FormValue(UserIDKey)
 	text := r.FormValue(TextKey)
-	message := tokenize(text) // 形態素解析
 
-	pushTextMessage(c, bot, mid, message)
+	pushText(c, bot, mid, tokenize(text))
 }
 
 func pushUnsupportedMessage(w http.ResponseWriter, r *http.Request) {
@@ -148,12 +151,10 @@ func pushUnsupportedMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mid := r.FormValue(UserIDKey)
-	message := "文字列以外はサポートしていません"
-
-	pushTextMessage(c, bot, mid, message)
+	pushText(c, bot, mid, "文字列以外はサポートしていません")
 }
 
-func pushTextMessage(c context.Context, bot *linebot.Client, userID string, message string) {
+func pushText(c context.Context, bot *linebot.Client, userID string, message string) {
 	log.Debugf(c, message)
 	if _, err := bot.PushMessage(userID, linebot.NewTextMessage(message)).Do(); err != nil {
 		log.Debugf(c, string(err.Error()))
@@ -161,6 +162,10 @@ func pushTextMessage(c context.Context, bot *linebot.Client, userID string, mess
 }
 
 func tokenize(s string) (m string) {
+	// 辞書の初期化は、必要になった時点で一度だけ行う。
+	initDic.Do(func() {
+		dic = tokenizer.SysDic()
+	})
 	t := tokenizer.NewWithDic(dic)
 	tokens := t.Tokenize(s)
 	for _, token := range tokens {
@@ -173,9 +178,18 @@ func tokenize(s string) (m string) {
 	return
 }
 
-func usage(w http.ResponseWriter, r *http.Request) {
-	response := template.Must(template.ParseFiles("templates/usage.html"))
-	response.Execute(w, struct {
+type usageHandler struct {
+	once     sync.Once
+	filename string
+	templ    *template.Template
+}
+
+func (u *usageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// テンプレートのコンパイルが一度で済むようにsync.Once型を使う。
+	u.once.Do(func() {
+		u.templ = template.Must(template.ParseFiles(filepath.Join("templates", u.filename)))
+	})
+	u.templ.Execute(w, struct {
 		QR string
 	}{
 		QR: os.Getenv("QR_URL"),
