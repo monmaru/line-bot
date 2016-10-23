@@ -20,10 +20,10 @@ import (
 // Constants
 const (
 	CallbackURL        = "/callback"
-	QueueName          = "default"
 	TaskAnalyzeURL     = "/tasks/morphological-analysis"
 	TaskUnsupportedURL = "/tasks/unsupported"
 	Port               = ":8080"
+	QueueName          = "default"
 	UserIDKey          = "mid"
 	TextKey            = "text"
 )
@@ -54,8 +54,8 @@ func createBotClient(c context.Context) (bot *linebot.Client, err error) {
 	return
 }
 
-func handleCallback(w http.ResponseWriter, req *http.Request) {
-	c := appengine.NewContext(req)
+func handleCallback(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
 	bot, err := createBotClient(c)
 
 	if err != nil {
@@ -64,7 +64,7 @@ func handleCallback(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	events, err := bot.ParseRequest(req)
+	events, err := bot.ParseRequest(r)
 	if err != nil {
 		if err == linebot.ErrInvalidSignature {
 			log.Errorf(c, "Invalid signature")
@@ -89,6 +89,8 @@ func handleCallback(w http.ResponseWriter, req *http.Request) {
 				log.Debugf(c, "Got beacon!!")
 				postUnsupportedTask(c, bot, event)
 			default:
+				log.Debugf(c, "Got other event!!")
+				postUnsupportedTask(c, bot, event)
 			}
 		}
 	}
