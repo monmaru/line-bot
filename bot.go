@@ -44,7 +44,13 @@ func init() {
 	http.HandleFunc(CallbackURL, handleCallback)
 	http.HandleFunc(TaskAnalyzeURL, pushAnalysisResult)
 	http.HandleFunc(TaskUnsupportedURL, pushUnsupportedMessage)
-	http.Handle("/", &usageHandler{filename: "usage.html"})
+	http.Handle("/", &templateHandler{
+		filename: "usage.html",
+		data: struct {
+			QR string
+		}{
+			QR: os.Getenv("QR_URL"),
+		}})
 	http.ListenAndServe(Port, nil)
 }
 
@@ -178,20 +184,18 @@ func tokenize(s string) (m string) {
 	return
 }
 
-type usageHandler struct {
+type templateHandler struct {
 	once     sync.Once
 	filename string
 	templ    *template.Template
+	data     interface{}
 }
 
-func (u *usageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (t *templateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("cache-control", "public, max-age=86400") // CDNにキャッシュさせる
 	// テンプレートのコンパイルが一度で済むようにsync.Once型を使う。
-	u.once.Do(func() {
-		u.templ = template.Must(template.ParseFiles(filepath.Join("templates", u.filename)))
+	t.once.Do(func() {
+		t.templ = template.Must(template.ParseFiles(filepath.Join("templates", t.filename)))
 	})
-	u.templ.Execute(w, struct {
-		QR string
-	}{
-		QR: os.Getenv("QR_URL"),
-	})
+	t.templ.Execute(w, t.data)
 }
