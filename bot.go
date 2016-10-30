@@ -54,14 +54,11 @@ func init() {
 	http.ListenAndServe(Port, nil)
 }
 
-func createBotClient(c context.Context) (bot *linebot.Client, err error) {
-	bot, err = linebot.New(
+func createBotClient(c context.Context) (*linebot.Client, error) {
+	return linebot.New(
 		os.Getenv("CHANNEL_SECRET"),
 		os.Getenv("CHANNEL_TOKEN"),
-		linebot.WithHTTPClient(urlfetch.Client(c)),
-	)
-
-	return
+		linebot.WithHTTPClient(urlfetch.Client(c)))
 }
 
 func handleCallback(w http.ResponseWriter, r *http.Request) {
